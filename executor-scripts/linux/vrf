@@ -13,6 +13,7 @@ handle_member() {
 
 case "$PHASE" in
 create)
+	echo "bridge-ports: $IF_BRIDGE_PORTS"
 	[ -n "$IF_VRF_TABLE" ] && handle_init "add"
 	;;
 pre-up)

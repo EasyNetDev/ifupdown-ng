@@ -1,0 +1,18 @@
+[Unit]
+Description=Teaming daemon for interface %I for ifupdown-ng
+Documentation=man:interfaces(5) man:ifup(8) man:ifdown(8) man:teamd(8) man:teamdctl(8) man:teamd.conf(5) man:teamnl(8)
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device
+DefaultDependencies=no
+IgnoreOnIsolate=yes
+ConditionPathExists=/run/ifteaming.%i
+
+[Service]
+Slice=system.slice
+Type=simple
+RemainAfterExit=yes
+SyslogIdentifier=teamd
+TimeoutStopSec=30s
+ExecStart=/usr/bin/teamd --team-dev %i -f /run/ifteaming.%i --take-over --no-quit-destroy --dbus-enable --usock-enable --no-ports --log-output stdout
+ExecStop=/usr/bin/teamd --team-dev %i --kill
+ExecReload=/bin/systemctl stop teamd@%i.service; /bin/systemctl start teamd@%i.service; 

@@ -1,0 +1,947 @@
+#!/bin/sh
+# This executor is responsible for setting up the Teaming LAG interfaces and start teamd daemon.
+#
+# Copyright (C) 2022 EasyNetDev <devel@easynet.dev>
+#
+# Sat, 11 Jul 2022 17:51:20 +0200
+#  -- EasyNetDev <devel@easynet.dev>
+#
+# Known options for the main interface are:
+#
+# General options:
+#  IF_TEAM_RUNNER				: broadcast, roundrobin, activebackup, loadbalance, lacp (default).
+#  IF_TEAM_MEMBERS				: list of the ports and their parameters in pharantes, in format "eth1(OPT1=VAL,OPT2=VAL,..) eth2(OPT1=VAL,..)
+#
+#  IF_TEAM_NOTIFY comma separated options:
+#	count=(int)				: default 0.
+#	interval=(int)				: default 0.
+#
+#  IF_TEAM_MCAST_REJOIN comma separated options:
+#	count=(int)				: default 0.
+#	interval=(int)				: default 0.
+#
+#  IF_TEAM_LINK_WATCH			: ethtool (default), arp_ping, nsna_ping
+#  IF_TEAM_LINK_WATCH_OPTIONS		: delay_up|delay_down
+#
+#
+# ACTIVE-BACKUP runner specific options:
+#  IF_TEAM_ACTIVEBACKUP commma separated options:
+#	hwaddr_policy=(string)			: same_all (default), by_active, only_active.
+#  Or per port config:
+#	PORTIFNAME(prio=(int))			: use as parameter in IF_TEAM_MEMBERS like: eth1(prio=100),eth2(prio=200).
+#	PORTIFNAME(sticky=(bool))		: use as parameter in IF_TEAM_MEMBERS like: eth1(sticky=true),eth2(sticky=false.
+#
+# LOAD BALANCE runner specific options:
+#  IF_TEAM_LOADBALANCE commma separated options:
+#
+#	tx_hash=(array)				: one or multiple choices using "+" to combine them from values: eth, vlan, ipv4, ipv6, ip, l3, tcp, udp, sctp, l4. Exemple: "eth+vlan+ip+l3"
+#	tx_balancer.name=(string)		: by default is None. The only value available is "basic".
+#	tx_balancer.balancing_interval=(int)	: default 50.
+#
+# LACP runner specific options:
+#  IF_TEAM_LACP commma separated options:
+#	active=(bool)				: default true
+#	fast_rate=(boot)			: default false
+#	tx_hash=(array)				: same as LOAD BALANCE
+#	tx_balancer.name=(string)		: same as LOAD BALANCE
+#	tx_balancer.balancing_interval=(int)	: same as LOAD BALANCE
+#	sys_prio=(int)				: 0 - 65535. Default 255.
+#	min_ports=(int)				: 1 - 255. Default 0.
+#	agg_select_policy=(string)		: lacp_prio (default), lacp_prio_stable, bandwidth, count, port_options
+#  Or per port config:
+#	PORTIFNAME(lacp_prio=(int))		: Port priority according to LACP standard. The lower number means higher priority.
+#	PORTIFNAME(lacp_key=(int))		: Port key according to LACP standard. It is only possible to aggregate ports with the same key.
+#
+# ETHTOOL Link watch specific options
+#  IF_TEAM_ETHTOOL commma separated options:
+#	delay-up=(int)			: default 0
+#	delay-down=(int)		: default 0
+#  Or per port config:
+#	PORTIFNAME(delay_up=(int))
+#	PORTIFNAME(delay_down=(int))
+#
+# ARP PING Link watch specific options
+#  IF_TEAM_ARPPING commma separated options:
+#	interval=(int)				: (no default)
+#	init_wait=(int)				: (default 0)
+#	missed_max=(int)			: (default 3)
+#	source_host=(hostname)			: (default 0.0.0.0). IP or hostname of the source
+#	target_host=(hostname)			: IP or hostname of the target
+#	validate_active=
+#	validate_inactive=(bool)
+#	send_always=(bool)
+#  Or per port config:
+#	PORTIFNAME(interval=(int))
+#	PORTIFNAME(init_wait=(int))
+#	PORTIFNAME(missed_max=(int))
+#	PORTIFNAME(source_host=(hostname))
+#	PORTIFNAME(target_host=(hostname))
+#	PORTIFNAME(validate_active=(bool))
+#	PORTIFNAME(validate_inactive=(bool))
+#	PORTIFNAME(send_always=(bool))
+#
+# NS/NA PING Link watch specific options
+# IF_TEAM_NSNAPING commma separated options:
+#	interval=(int)				: (no default)
+#	init_wait=(int)				: (default 0)
+#	missed_max=(int)			: (default 3)
+#	target_host=(hostname)
+#  Or per port config:
+#	PORTIFNAME(interval=(int))
+#	PORTIFNAME(init_wait=(int))
+#	PORTIFNAME(missed_max=(int))
+#	PORTIFNAME(target_host=(hostname))
+#
+# In case of multiple runnnes options or link watches, only the necessary ones will be used.
+
+[ -n "$VERBOSE" ] && set -x
+
+################################################################################
+#                     TEAMING management functions                             #
+################################################################################
+
+CONFIG_FILE="/run/ifteaming"
+
+truefalse() {
+        case "$1" in
+        true|yes|1)  echo true ;;
+        *)      echo false ;;
+        esac
+}
+
+get_depend_list() {
+    local MEMBERS_LIST
+    while [ $1 ]; do
+	MEMBERS_LIST="${MEMBERS_LIST# } ${1%%(*}"
+	shift
+    done
+    echo $MEMBERS_LIST
+}
+
+# Remove incorrect spaces around commas
+options_format_correction() {
+    # argument 1 should be send as a full string, like "$STRING" and not like $STRING. Second format will send multiple argumets if you have spaces.
+    echo "$1" | sed -e "s/, /,/g" -e "s/ ,/,/g" -e "s/= /=/g" -e "s/ =/=/g"
+}
+
+get_option_value() {
+
+    echo "${1##*=}"
+
+}
+
+# We have this kind of runners: broadcast, roundrobin, activebackup, loadbalance, lacp
+# For each type of runner we should have some info encoded in comma separate options.
+# broadcast and roundrobin doesn't have any kind of options.
+
+# Check tx_hash for loadbalance and lacp
+build_tx_hash() {
+	local tx_hash
+	local list_hashes
+	local list_hashes_json=""
+
+	tx_hash="\"tx_hash\": ["
+
+	#echo "tx_hash=$1"
+
+	hashes_list=$(echo $1 | tr "+" "\n")
+	for i in $hashes_list; do
+		case "$i" in
+			eth|vlan|ipv4|ipv6|ip|l3|tcp|udp|sctp|l4)
+				list_hashes_json="$list_hashes_json, \"$i\""
+			;;
+			*)
+			    #Invalid hash, ignore it
+			;;
+		esac
+	done
+
+	tx_hash="${tx_hash}${list_hashes_json#, }]"
+	echo "$tx_hash"
+}
+
+convert_to_int(){
+	printf "%d\n" "$1" 2>/dev/null
+}
+
+# Options checks
+get_options() {
+	# Runner name is necessary only for some settings.
+	# Currently only ACTIVE-BACKUP has such special options.
+	local opt=$1
+	local copt
+	local cval
+	local opt_ok=0
+	local opt_list
+
+	#local opt_name=${opt%%*.}
+	local opt_prop=${opt#*.}
+
+	opt_list=$(echo $2 | tr "," "\n")
+	for line in $opt_list; do
+	    copt=${line%=*}
+	    cval=${line##*=}
+	    if [ "$copt" = "$opt_prop" ]; then
+		opt_ok=1
+		break
+	    fi
+	done
+
+	cval=$(echo $cval | tr "[:upper:]" "[:lower:]")
+
+	# Check the value of the options if is in the allowed list.
+	case "$opt" in
+	# ACTIVE-BACKUP runner options
+		runner.hwaddr_policy)
+		    # Validate only the correct values for options and return the json for this option
+		    if [ "$opt_ok" = 1 ]; then
+			case "$cval" in
+			    same_all|by_active|only_active)
+				echo "\"hwaddr_policy\" : \"$cval\""
+			    ;;
+			    *)
+				echo "\"hwaddr_policy\" : \"same_all\""
+			    ;;
+			esac
+		    else
+			echo "\"hwaddr_policy\" : \"same_all\""
+		    fi
+		;;
+		ports.prio)
+		    # Special keyword for ports.PORTIFNAME.prio
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=1
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 ]; then
+				echo "\"$opt_prop\": 0"
+			else
+				echo "\"sys_prio\": $cval"
+			fi
+		    fi
+		    ;;
+		ports.sticky)
+		    # Special keyword for ports.PORTIFNAME.sticky
+		    if [ "$opt_ok" = 1 ]; then
+			echo "\"$opt_prop\": "$(truefalse $cval)
+		    fi
+		    ;;
+	# LOAD BALANCE & LACP runner options
+		runner.tx_hash)
+		    if [ "$opt_ok" = 1 ]; then
+			build_tx_hash "$cval"
+		    else
+			build_tx_hash "eth"
+		    fi
+		;;
+		runner.tx_balancer.name)
+		    # Validate only the correct values for options and return the json for this option
+		    if [ "$opt_ok" = 1 ]; then
+			case "$cval" in
+			    basic)
+				echo "\"name\": \"$cval\""
+			    ;;
+			    *)
+			    ;;
+			esac
+		    fi
+		;;
+		runner.tx_balancer.balancing_interval)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=50
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -ge 0 ]; then
+			    echo "\"balancing_interval\": $cval"
+			fi
+		    fi
+		;;
+	# LACP runner options
+		runner.active|runner.fast_rate)
+		    if [ "$opt_ok" = 1 ]; then
+			echo "\"$opt_prop\": "$(truefalse $cval)
+		    else
+			echo "\"$opt_prop\": true"
+		    fi
+		;;
+		runner.sys_prio)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=1
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 -a "$cval" -gt 65535 ]; then
+				echo "\"sys_prio\": 255"
+			else
+				echo "\"sys_prio\": $cval"
+			fi
+		    fi
+		;;
+		runner.min_ports)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=1
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 1 -a "$cval" -gt 255 ]; then
+			    echo "\"min_ports\": 1"
+			else
+				echo "\"min_ports\": $cval"
+			fi
+		    fi
+		;;
+		runner.agg_select_policy)
+		    if [ "$opt_ok" = 1 ]; then
+			case "$cval" in
+			    lacp_prio|lacp_prio_stable|bandwidth|count|port_options)
+				echo "\"agg_select_policy\": \"$cval\""
+			    ;;
+			    *)
+				echo "\"agg_select_policy\": \"lacp_prio\""
+			    ;;
+			esac
+		    fi
+		;;
+		ports.lacp_prio)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=0
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 ]; then
+				cval=0
+			fi
+			echo "\"$opt_prop\": $cval"
+		    fi
+		;;
+		ports.lacp_key)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=0
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 ]; then
+				cval=0
+			fi
+			echo "\"$opt_prop\": $cval"
+		    fi
+		;;
+	# LINK WATCH options
+		link_watch.name)
+		    if [ "$opt_ok" = 1 ]; then
+			case "$cval" in
+			    ethtool|arp_ping|nsna_ping)
+				echo "\"$opt_prop\": $cval"
+			    ;;
+			esac
+		    fi
+		;;
+	# ETHTOOL LINK WATCH options
+		link_watch.delay_up|link_watch.delay_down)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=0
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 ]; then
+				echo "\"$opt_prop\": 0"
+			else
+				echo "\"$opt_prop\": $cval"
+			fi
+		    fi
+		;;
+	# ARP PING & NS/NA PING LINK WATCH options
+		link_watch.interval|link_watch.init_wait|link_watch.missed_max)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=0
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$cval" -lt 0 ]; then
+				if [ "$opt" = "link_watch.missed_max" ]; then
+					echo "\"$opt_prop\": 3"
+				else
+					echo "\"delay_up\": 0"
+				fi
+			else
+				echo "\"$opt_prop\": $cval"
+			fi
+		    fi
+		;;
+		link_watch.source_host|link_watch.target_host)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -n "$cval" ]; then
+				echo "\"$opt_prop\": \"$cval\""
+			fi
+		    fi
+		;;
+		link_watch.validate_active|link_watch.validate_inactive|link_watch.send_always)
+		    if [ "$opt_ok" = 1 ]; then
+			echo "\"$opt_prop\": "$(truefalse $cval)
+		    fi
+		;;
+	# NOTIFY PEERS & MCAST REJOIN
+		notify_peers.count|mcast_rejoin.count)
+		    if [ "$opt_ok" = 1 ]; then
+			if [ -z "$cval" ]; then
+				cval=0
+			else
+				cval=$(convert_to_int "$cval")
+			fi
+			if [ "$IF_TEAM_RUNNER" = "activebackup" -a "$cval" -lt 1 ]; then
+				echo "\"$opt_prop\": 1"
+			elif [ "$cval" -lt 0 ]; then
+				echo "\"$opt_prop\": 0"
+			else
+				echo "\"$opt_prop\": $cval"
+			fi
+		    fi
+		;;
+		notify_peers.interval|mcast_rejoin.interval)
+		    if [ -z "$cval" ]; then
+			    cval=0
+		    else
+			    cval=$(convert_to_int "$cval")
+		    fi
+		    if [ "$cval" -lt 0 ]; then
+			echo "\"$opt_prop\": 0"
+		    else
+			echo "\"$opt_prop\": $cval"
+		    fi
+		;;
+		*)
+	# Unknown key return null string
+		;;
+	esac
+
+}
+
+
+build_tx_balancer() {
+	local tx_balancer_name=$1
+	local tx_balancer_int=$2
+	
+	local tx_balancer_json="\"tx_balancer\": {"
+	local tx_balancer_opt_json=""
+
+	if [ -n "${tx_balancer_name}" ]; then
+		tx_balancer_opt_json="$tx_balancer_name"
+	fi
+	if [ -n "${tx_balancer_int}" ]; then
+		tx_balancer_opt_json="$tx_balancer_opt_json, $tx_balancer_int"
+	fi
+
+	tx_balancer_json="${tx_balancer_json}${tx_balancer_opt_json#, }}"
+	echo "$tx_balancer_json"
+}
+
+# BROADCAST & ROUND-ROBIN runner json config generation
+#build_brd_rr_runner() {
+#	local runner_json=""
+#	runner_json="\"runner\": {\"name\": \"$1\"}"
+#	echo "$runner_json"
+#}
+
+# Build json config for runner
+build_runner() {
+	# Generate json config for activebackup_runner
+	local tx_balancer=$1
+	local tx_hash=$2
+	shift; shift
+
+	local runner_json=""
+
+	runner_json="\"runner\": {\"name\": \"$IF_TEAM_RUNNER\""
+
+	while [ -n "$1" ]; do 
+	    if [ -n "$1" ]; then
+		runner_json="${runner_json}, $1"
+	    fi
+	    shift
+	done
+
+	if [ -n "$tx_balancer" ]; then
+		runner_json="${runner_json}, $tx_balancer"
+	fi
+	if [ -n "$tx_hash" ]; then
+		runner_json="${runner_json}, $tx_hash"
+	fi
+	runner_json="${runner_json} }"
+
+	echo "$runner_json"
+}
+
+build_linkwatch() {
+	# Generate json config for ETHTOOL LINK WATCH
+	local linkwatch_json=""
+	local linkwatch_options=""
+
+
+	linkwatch_json="\"link_watch\": {\"name\": \"$IF_TEAM_LINK_WATCH\""
+	linkwatch_options=""
+
+	while [ -n "$1" ]; do
+	    linkwatch_options="$linkwatch_options, $1"
+	    shift
+	done
+	linkwatch_json="${linkwatch_json}${linkwatch_options}}"
+	echo "$linkwatch_json"
+}
+
+build_notifypeers_mcastrejoin() {
+	# Generate json config for ETHTOOL LINK WATCH
+	local data_name=$1
+	shift
+	local data_json=""
+	local data_options=""
+
+
+	data_json="\"$data_name\": {"
+	data_options=""
+
+	while [ -n "$1" ]; do
+	    data_options="$data_options, $1"
+	    shift
+	done
+	data_json="${data_json}${data_options#, }}"
+	echo "$data_json"
+
+}
+
+write_config_file_top() {
+	echo "{" > ${CONFIG_FILE}.$IFACE
+	echo -n "	\"device\": \"$IFACE\"" >> ${CONFIG_FILE}.$IFACE
+}
+
+write_config_file_bottom() {
+	echo >> ${CONFIG_FILE}.$IFACE
+	echo "}" >> ${CONFIG_FILE}.$IFACE
+}
+
+write_config_runner() {
+	local link_watch=$1
+	local mcast_rejoin=$2
+	local notify_peers=$3
+	local runner=$4
+
+	if [ -n "$link_watch" ]; then
+	    echo "," >> ${CONFIG_FILE}.$IFACE
+	    echo -n "	$link_watch" >> ${CONFIG_FILE}.$IFACE
+	fi
+	if [ -n "$mcast_rejoin" ]; then
+	    echo "," >> ${CONFIG_FILE}.$IFACE
+	    echo -n "	$mcast_rejoin" >> ${CONFIG_FILE}.$IFACE
+	fi
+	if [ -n "$runner" ]; then
+	    echo "," >> ${CONFIG_FILE}.$IFACE
+	    echo -n "	$runner" >> ${CONFIG_FILE}.$IFACE
+	fi
+	if [ -n "$notify_peers" ]; then
+	    echo "," >> ${CONFIG_FILE}.$IFACE
+	    echo -n "	$notify_peers" >> ${CONFIG_FILE}.$IFACE
+	fi
+}
+
+write_config_port_start() {
+	echo "," >> ${CONFIG_FILE}.$IFACE
+	echo -n "	\"ports\": {" >> ${CONFIG_FILE}.$IFACE
+}
+
+write_config_port() {
+	local is_first_port=$1
+
+	if [ -n "$2" ]; then
+	    if [ "$is_first_port" -eq 1 ]; then
+		echo >> ${CONFIG_FILE}.$IFACE
+	    else
+		echo "," >> ${CONFIG_FILE}.$IFACE
+	    fi
+	    echo -n "		$2" >> ${CONFIG_FILE}.$IFACE
+	fi
+}
+
+write_config_port_end() {
+	echo >> ${CONFIG_FILE}.$IFACE
+	echo -n "	}" >> ${CONFIG_FILE}.$IFACE
+}
+
+
+
+prepare_runner_config() {
+
+	local runner
+	local notify_peers
+	local mcast_rejoin
+	local link_watch
+	local tx_balancer
+	local tx_hash
+	local json_OPT_1
+	local json_OPT_2
+	local json_OPT_3
+	local json_OPT_4
+	local json_OPT_5
+	local json_OPT_6
+	local json_OPT_7
+	local json_OPT_8
+
+	IF_TEAM_RUNNER=$(echo $IF_TEAM_RUNNER | tr "[:upper:]" "[:lower:]")
+
+	case "$IF_TEAM_RUNNER" in
+		broadcast)
+		    #runner=$(build_brd_rr_runner "broadcast")
+		    runner=$(build_runner "" "" "")
+		;;
+		roundrobin)
+		    #runner=$(build_brd_rr_runner "roundrobin")
+		    runner=$(build_runner "" "" "")
+		;;
+		activebackup)
+		    # Remove incorrect spaces around commas
+		    IF_TEAM_ACTIVEBACKUP=$(options_format_correction "$IF_TEAM_ACTIVEBACKUP")
+		    # Get runner options for ACTIVE-BACKUP
+		    json_OPT_1=$(get_options "runner.hwaddr_policy" "$IF_TEAM_ACTIVEBACKUP")
+		    runner=$(build_runner "" "" "$json_OPT_1")
+		;;
+		loadbalance)
+		    IF_TEAM_LOADBALANCE=$(options_format_correction "$IF_TEAM_LOADBALANCE")
+		    # Get runner options for LOAD BALANCE
+		    tx_hash=$(get_options "runner.tx_hash" "$IF_TEAM_LOADBALANCE")
+		    json_OPT_1=$(get_options "runner.tx_balancer.name" "$IF_TEAM_LOADBALANCE")
+		    json_OPT_2=$(get_options "runner.tx_balancer.balancing_interval" "$IF_TEAM_LOADBALANCE")
+		    tx_balancer=$(build_tx_balancer "$json_OPT_1" "$json_OPT_2")
+		    runner=$(build_runner "$tx_balancer" "$tx_hash" "")
+		;;
+		lacp|*)
+		    IF_TEAM_RUNNER="lacp"
+		    IF_TEAM_LACP=$(options_format_correction "$IF_TEAM_LACP")
+		    # Get runner options for LACP
+		    tx_hash=$(get_options "runner.tx_hash" "$IF_TEAM_LACP")
+		    json_OPT_1=$(get_options "runner.tx_balancer.name" "$IF_TEAM_LACP")
+		    json_OPT_2=$(get_options "runner.tx_balancer.balancing_interval" "$IF_TEAM_LACP")
+		    json_OPT_3=$(get_options "runner.active" "$IF_TEAM_LACP")
+		    json_OPT_4=$(get_options "runner.fast_rate" "$IF_TEAM_LACP")
+		    json_OPT_5=$(get_options "runner.sys_prio" "$IF_TEAM_LACP")
+		    json_OPT_6=$(get_options "runner.min_ports" "$IF_TEAM_LACP")
+		    json_OPT_7=$(get_options "runner.agg_select_policy" "$IF_TEAM_LACP")
+		    tx_balancer=$(build_tx_balancer "$json_OPT_1" "$json_OPT_2")
+		    runner=$(build_runner "$tx_balancer" "$tx_hash" "$json_OPT_3" "$json_OPT_4" "$json_OPT_5" "$json_OPT_6" "$json_OPT_7" "$json_OPT_8")
+		;;
+	esac
+
+	IF_TEAM_LINK_WATCH=$(echo $IF_TEAM_LINK_WATCH | tr "[:upper:]" "[:lower:]")
+	IF_TEAM_LINK_WATCH=$(options_format_correction "$IF_TEAM_LINK_WATCH")
+	IF_TEAM_LINK_WATCH_OPTIONS=$(echo $IF_TEAM_LINK_WATCH_OPTIONS | tr "[:upper:]" "[:lower:]")
+	IF_TEAM_LINK_WATCH_OPTIONS=$(options_format_correction "$IF_TEAM_LINK_WATCH_OPTIONS")
+
+	case "$IF_TEAM_LINK_WATCH" in
+		arp_ping)
+		    # Get link watch options for ARP PING
+		    json_OPT_1=$(get_options "link_watch.interval" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_2=$(get_options "link_watch.init_wait" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_3=$(get_options "link_watch.missed_max" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_4=$(get_options "link_watch.source_host" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_5=$(get_options "link_watch.target_host" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_6=$(get_options "link_watch.validate_active" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_7=$(get_options "link_watch.validate_inactive" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_8=$(get_options "link_watch.send_always" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    link_watch=$(build_linkwatch "$json_OPT_1" "$json_OPT_2" "$json_OPT_3" "$json_OPT_4" "$json_OPT_5" "$json_OPT_6" "$json_OPT_7" "$json_OPT_8")
+		;;
+		nsna_ping)
+		    # Get link watch options for NSNA PING
+		    json_OPT_1=$(get_options "link_watch.interval" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_2=$(get_options "link_watch.init_wait" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_3=$(get_options "link_watch.missed_max" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_4=$(get_options "link_watch.target_host" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    link_watch=$(build_linkwatch "$json_OPT_1" "$json_OPT_2" "$json_OPT_3" "$json_OPT_4")
+		;;
+		ethtool|*)
+		    # Get link watch options for NSNA PING
+		    IF_TEAM_LINK_WATCH="ethtool"
+		    json_OPT_1=$(get_options "link_watch.delay_up" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    json_OPT_2=$(get_options "link_watch.delay_down" "$IF_TEAM_LINK_WATCH_OPTIONS")
+		    link_watch=$(build_linkwatch "$json_OPT_1" "$json_OPT_2")
+		;;
+	esac
+	
+	IF_TEAM_NOTIFY_PEERS=$(echo $IF_TEAM_NOTIFY_PEERS | tr "[:upper:]" "[:lower:]")
+	IF_TEAM_NOTIFY_PEERS=$(options_format_correction "$IF_TEAM_NOTIFY_PEERS")
+	json_OPT_1=$(get_options "notify_peers.count" "$IF_TEAM_NOTIFY_PEERS")
+	json_OPT_2=$(get_options "notify_peers.interval" "$IF_TEAM_NOTIFY_PEERS")
+	notify_peers=$(build_notifypeers_mcastrejoin "notify_peers" "$json_OPT_1" "$json_OPT_2")
+
+	IF_TEAM_MCAST_REJOIN=$(echo $IF_TEAM_NOTIFY_PEERS | tr "[:upper:]" "[:lower:]")
+	IF_TEAM_MCAST_REJOIN=$(options_format_correction "$IF_TEAM_NOTIFY_PEERS")
+	json_OPT_1=$(get_options "mcast_rejoin.count" "$IF_TEAM_NOTIFY_PEERS")
+	json_OPT_2=$(get_options "mcast_rejoin.interval" "$IF_TEAM_NOTIFY_PEERS")
+	mcast_rejoin=$(build_notifypeers_mcastrejoin "mcast_rejoin" "$json_OPT_1" "$json_OPT_2")
+
+	write_config_runner "$link_watch" "$mcast_rejoin" "$notify_peers" "$runner"
+
+}
+
+build_port_options_json(){
+
+	local json_port_opts=""
+
+	while [ -n "$1" ]; do
+	    if [ -n "$1" ]; then
+		json_port_opts="$json_port_opts, $1"
+	    fi
+	    shift
+	done
+
+	echo "${json_port_opts#, }"
+}
+
+get_port_options_json(){
+
+	local port_opts="$1"
+	local json_OPT_1=""
+	local json_OPT_2=""
+	local json_OPT_3=""
+	local json_OPT_4=""
+	local json_OPT_5=""
+	local json_OPT_6=""
+	local json_OPT_7=""
+	local json_OPT_8=""
+	local json_OPT_9=""
+	local json_OPT_10=""
+	local json_OPT_11=""
+	local json_port_opts=""
+
+	# ACTIVE-BACKUP and LACP runners have some special options per port
+	case "$IF_TEAM_RUNNER" in
+		activebackup)
+		    json_OPT_1=$(get_options "ports.prio" "$port_opts")
+		    json_OPT_2=$(get_options "ports.sticky" "$port_opts")
+		;;
+		lacp)
+		    json_OPT_1=$(get_options "ports.lacp_prio" "$port_opts")
+		    json_OPT_2=$(get_options "ports.lacp_key" "$port_opts")
+		;;
+	esac
+
+	json_OPT_3=$(get_options "link_watch.name" "$port_opts")
+
+	case "$IF_TEAM_LINK_WATCH" in
+		ethtool)
+		    json_OPT_4=$(get_options "link_watch.delay_up" "$port_opts")
+		    json_OPT_5=$(get_options "link_watch.delay_down" "$port_opts")
+		;;
+		arp_ping)
+		    json_OPT_4=$(get_options "link_watch.interval" "$port_opts")
+		    json_OPT_5=$(get_options "link_watch.init_wait" "$port_opts")
+		    json_OPT_6=$(get_options "link_watch.missed_max" "$port_opts")
+		    json_OPT_7=$(get_options "link_watch.source_host" "$port_opts")
+		    json_OPT_8=$(get_options "link_watch.target_host" "$port_opts")
+		    json_OPT_9=$(get_options "link_watch.validate_active" "$port_opts")
+		    json_OPT_10=$(get_options "link_watch.validate_inactive" "$port_opts")
+		    json_OPT_11=$(get_options "link_watch.send_always" "$port_opts")
+		;;
+		nsna_ping)
+		    json_OPT_4=$(get_options "link_watch.interval" "$port_opts")
+		    json_OPT_5=$(get_options "link_watch.init_wait" "$port_opts")
+		    json_OPT_6=$(get_options "link_watch.missed_max" "$port_opts")
+		    json_OPT_7=$(get_options "link_watch.target_host" "$port_opts")
+		;;
+	esac
+
+	build_port_options_json "$json_OPT_1" "$json_OPT_2" "$json_OPT_3" "$json_OPT_4" "$json_OPT_5" "$json_OPT_6" "$json_OPT_7" "$json_OPT_8" "$json_OPT_9" "$json_OPT_10"
+}
+
+prepare_ports_member_config(){
+
+	local json_port_opts=""
+	local json_port=""
+	local is_first_port=1
+
+	local port_member
+	local port_member_conf
+	local port_member_opts
+
+	write_config_port_start
+	for port_member_conf in ${IF_TEAM_MEMBERS}; do
+	    port_member=${port_member_conf%%\(*}
+	    port_member_opts=${port_member_conf#*\(}
+	    port_member_opts=${port_member_opts%\)*}
+	    json_port_opts=$(get_port_options_json "$port_member_opts")
+	    json_port="\"$port_member\": {${json_port_opts}}"
+	    write_config_port "$is_first_port" "$json_port"
+	    if [ "$is_first_port" = "1" ]; then
+		is_first_port=0
+	    fi
+	done
+	write_config_port_end
+}
+
+add_members(){
+
+	local port_conf
+	local port_member
+
+	for port_conf in ${IF_TEAM_MEMBERS}; do
+	    port_member=${port_conf%%\(*}
+	    # Work around the current execution order
+	    ${MOCK} ip link set ${port_member} down
+	    ${MOCK} ip link set ${port_member} master ${IFACE}
+	    ${MOCK} ip link set ${port_member} up
+	done
+}
+
+
+
+# Backwards compatibility with non-systemd OS
+start_daemon_via_sysvinit() {
+	# Check if we have the config file for our interface
+	if [ -f "${CONFIG_FILE}.${IFACE}" ]; then
+		teamd --team-dev ${IFACE} -f ${CONFIG_FILE}.${IFACE} --take-over --no-quit-destroy --dbus-enable --usock-enable --no-ports --log-output stdout --daemonize --pid-file=/run/teamd.${IFACE}.pid
+	fi
+}
+
+stop_daemon_via_sysvinit() {
+	if teamd --team-dev ${IFACE} --check; then
+		teamd --team-dev ${IFACE} --kill
+	fi
+}
+
+start_daemon_via_systemd() {
+
+	# A normal bootup service will have an [Install] section to be able start at boot.
+	# The service teamd@.serivce doesn't have such section, because is conditioned by 
+	# the config file which is created by this executor.
+	# After executor is building the config file we have to start the service teamd@.service.
+	# But this start is done also by the executor.
+	#
+	# Note: because networking.service has Type=oneshot, any direct launch of a daemon under
+	# the executor it will be killed when networking.service ends its execution.
+	# That's why we need a special service for teamd that is started from systemd itself after
+	# this script created the config file.
+	# 
+
+	service_status=$(systemctl is-enabled teamd@${IFACE}.service 2>/dev/null)
+
+	case "$service_status" in
+		static)
+			# This is the normal behavior for this service, because it must be started from this script and not at boot time.
+			if ! systemctl start teamd@${IFACE}.service; then
+			    echo "Service teamd@${IFACE}.service failed to launch. Please check the logs."
+			    exit 1
+			fi
+		;;
+		*)
+		;;
+	esac
+}
+
+stop_daemon_via_systemd() {
+	service_status=$(systemctl is-enabled teamd@${IFACE}.service 2>/dev/null)
+	case "$service_status" in
+		static)
+			# This is the normal behavior for this service, because it must be started from this script and not at boot time.
+			if ! systemctl stop teamd@${IFACE}.service; then
+			    #echo "Service teamd@${IFACE}.service failed to stop. Please check the logs."
+			    exit 1
+			fi
+		;;
+		*)
+		;;
+	esac
+}
+
+is_systemd() {
+	systemd_status=$(systemctl is-system-running)
+	# In case we have systemd, we must have these outputs:
+	# initializing, starting, running, degraded, maintenance, stopping, offline or unknown
+	# All statuses except offile and unknown are valid for a running systemd system.
+	case "$systemd_status" in
+	    initializing|starting|running|degraded|maintenance|stopping)
+		return 0
+	    ;;
+	    *)
+		# This could be an indication that systemd is not running or is using other type of system manager, like sysvinit
+		return 1
+	esac
+
+}
+
+start_teamd_service() {
+	# Check if we are running systemd or sysvinit
+	# In case of systemd we need to start teamd@${IFACE}.service
+	# In case of non-systemd we have to start the daemon manually
+	if is_systemd; then
+	    start_daemon_via_systemd
+	else
+	    start_daemon_via_sysvinit
+	fi
+}
+
+stop_teamd_service() {
+	# Check if we are running systemd or sysvinit
+	# In case of systemd we need to start teamd@${IFACE}.service
+	# In case of non-systemd we have to start the daemon manually
+	if is_systemd; then
+	    stop_daemon_via_systemd
+	else
+	    stop_daemon_via_sysvinit
+	fi
+}
+
+prepare_config_file() {
+	write_config_file_top
+	prepare_runner_config
+	prepare_ports_member_config
+	write_config_file_bottom
+}
+
+if [ -n "$IF_TEAM_MEMBERS" ]; then
+	# Remove incorrect spaces around commas
+	IF_TEAM_MEMBERS=$(options_format_correction "$IF_TEAM_MEMBERS")
+fi
+
+case "$PHASE" in
+depend)
+        # Needs our ports to be pre-configured
+	if [ -n "$IF_TEAM_MEMBERS" ]; then
+		get_depend_list $IF_TEAM_MEMBERS
+	fi
+        ;;
+create)
+        # Create teaming device
+	if [ -d "/sys/class/net/${IFACE}" ]; then
+		exit 0
+	fi
+	
+	${MOCK} ip link add "${IFACE}" type team
+	
+	prepare_config_file
+	start_teamd_service
+	add_members
+
+	exit 0
+        ;;
+pre-up)
+        # Check if $IFACE exists. If not, try skip.
+	exit
+	;;
+post-down)
+	exit
+	;;
+destroy)
+	stop_teamd_service
+	if [ -z "${MOCK}" -a ! -d "/sys/class/net/${IFACE}" ]; then
+		exit 0
+	fi
+
+	${MOCK} ip link del "${IFACE}" type team
+	;;
+esac

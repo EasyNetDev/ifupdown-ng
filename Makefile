@@ -107,6 +107,7 @@ EXECUTOR_SCRIPTS_OPT ?= \
 	ethtool \
 	gre \
 	mpls \
+	team \
 	tunnel \
 	vrf \
 	vxlan \
@@ -171,6 +172,7 @@ MANPAGES_5 = \
 	doc/interfaces-bridge.5 \
 	doc/interfaces-forward.5 \
 	doc/interfaces-ppp.5 \
+	doc/interfaces-team.5 \
 	doc/interfaces-tunnel.5 \
 	doc/interfaces-vrf.5 \
 	doc/interfaces-vxlan.5 \
