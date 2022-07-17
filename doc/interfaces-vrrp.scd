@@ -22,23 +22,22 @@ The following options allow to set up VRRPs.
 # VRRP-RELATED OPTIONS
 
 *vrrp-id* _id_ [_id_]
-        In case is needed to create only the MACVLAN interfaces, use this
-        option. Also is an alias for *vrrp-address* _id_ [_id_]
+	In case is needed to create only the MACVLAN interfaces, use this
+	option. Also is an alias for *vrrp-address* _id_ [_id_]
 
 *vrrp-address* _id_ [_address_ [_address_]] [_id_ [_address_ [_address_]]]
-        The _id_ is the Virtual Router ID. Can have values between 1 and 255.
-        The _address_ can be optional. This is the VRRP IPv4 or IPv6 address
-        which is the backup IP.
-        If address is omited then ifupdown-ng will just create the macvlan
-        interfaces. You have to add the IPs from FRRouting or manually.
-        Address should be CIDR format IP/PREFIX.
-        Note: don't use /32 for backup interfaces. There are chances to
-        have issues with the traffic. Use the same prefix as per subnet!
-        By default if you are not giving a prefix to the IP, the script
-        will add /24 or /64 by default.
+	The _id_ is the Virtual Router ID. Can have values between 1 and 255.
+	The _address_ can be optional. This is the VRRP IPv4 or IPv6 address
+	which is the backup IP.
+	If address is omited then ifupdown-ng will just create the macvlan
+	interfaces. You have to add the IPs from FRRouting or manually.
+	Address should be CIDR format IP/PREFIX.
+	Note: don't use /32 for backup interfaces. There are chances to
+	have issues with the traffic. Use the same prefix as per subnet!
+	By default if you are not giving a prefix to the IP, the script
+	will add /24 or /64 by default.
 
-Note: *vrrp-address* has priority over *vrrp-id*, because if both of options
-are given, then only *vrrp-address* it will be processed.
+Note: *vrrp-address* has priority over *vrrp-id*, because if both of options are given, then only *vrrp-address* it will be processed.
 
 You can use multiple VRRP IDs for one single interface, but they definitely 
 must differ. Don't use multiple time same VRRP ID on same interface, only 2 
@@ -51,25 +50,25 @@ A VRRP example:
 ```
 auto eth0
 iface eth0
-        address 192.168.0.2/24
-        vrrp-address 10 192.168.0.1/24
+	address 192.168.0.2/24
+	vrrp-address 10 192.168.0.1/24
 
 auto eth1
 iface eth1
-        address 172.17.0.2/24
-        address 172.17.1.2/24
-        address 172.17.2.2/24
-        address fc00:172:17:0::2/64
-        address fc00:172:17:1::2/64
-        address fc00:172:17:2::2/64
-        vrrp-address 16 172.17.0.1/24 172.17.1.1/24 fc00:172:17:0::1/64 fc00:172:17:1::1/64 17 172.17.2.1/24 fc00:172:17:2::1/64
+	address 172.17.0.2/24
+	address 172.17.1.2/24
+	address 172.17.2.2/24
+	address fc00:172:17:0::2/64
+	address fc00:172:17:1::2/64
+	address fc00:172:17:2::2/64
+	vrrp-address 16 172.17.0.1/24 172.17.1.1/24 fc00:172:17:0::1/64 fc00:172:17:1::1/64 17 172.17.2.1/24 fc00:172:17:2::1/64
 
 # Create only the MACVLAN interfaces
 auto eth3
 iface eth3
-        vrrp-id 18 19
+	vrrp-id 18 19
 # Or instead vrrp-id you can use vrrp-address
-        vrrp-address 18 19
+	vrrp-address 18 19
 ```
 
 We will have 2 additional interfaces for eth0: vrrp4-db559fac and vrrp6-d8e4c6a2,
