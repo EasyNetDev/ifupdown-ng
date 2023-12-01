@@ -87,6 +87,12 @@ YAML_SRC = \
 LIBIFUPDOWN_${CONFIG_YAML}_OBJ += ${YAML_SRC:.c=.o}
 CPPFLAGS_${CONFIG_YAML} += -DCONFIG_YAML
 
+# enable VRRP crc32b tool (+15 KB)
+CONFIG_CRC32B ?= Y
+CRC32B_SRC = tools/crc32b.c
+CRC32B_${CONFIG_CRC32B}_OBJ += ${CRC32B_SRC:.c=.o}
+CRC32B_${CONFIG_CRC32B} += crc32b
+
 LIBIFUPDOWN_OBJ += ${LIBIFUPDOWN_Y_OBJ}
 MULTICALL_OBJ += ${MULTICALL_Y_OBJ}
 CMDS += ${CMDS_Y}
@@ -109,6 +115,7 @@ EXECUTOR_SCRIPTS_OPT ?= \
 	mpls \
 	tunnel \
 	vrf \
+	vrrp \
 	vxlan \
 	wifi \
 	wireguard \
@@ -173,6 +180,7 @@ MANPAGES_5 = \
 	doc/interfaces-ppp.5 \
 	doc/interfaces-tunnel.5 \
 	doc/interfaces-vrf.5 \
+	doc/interfaces-vrrp.5 \
 	doc/interfaces-vxlan.5 \
 	doc/interfaces-wifi.5 \
 	doc/interfaces-wireguard.5 \
