@@ -250,6 +250,7 @@ iface eth0
 *interfaces-forward*(5)
 *interfaces-mpls*(5)
 *interfaces-ppp*(5)
+*interfaces-teaming*(5)
 *interfaces-tunnel*(5)
 *interfaces-vrf*(5)
 *interfaces-vxlan*(5)

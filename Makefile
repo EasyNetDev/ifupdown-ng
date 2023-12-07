@@ -94,6 +94,8 @@ CRC32_SRC = tools/crc32.c tools/cksum.c tools/crctab.c
 CRC32_${CONFIG_CRC32}_OBJ += ${CRC32_SRC:.c=.o}
 CRC32_${CONFIG_CRC32} += crc32sum
 
+TEAMING_TOOLS = teaming-build-config  teaming-service
+
 LIBIFUPDOWN_OBJ += ${LIBIFUPDOWN_Y_OBJ}
 MULTICALL_OBJ += ${MULTICALL_Y_OBJ}
 CMDS += ${CMDS_Y}
@@ -114,6 +116,7 @@ EXECUTOR_SCRIPTS_OPT ?= \
 	ethtool \
 	gre \
 	mpls \
+	team \
 	tunnel \
 	vrf \
 	vrrp \
@@ -173,6 +176,9 @@ install: all
 	if [ -n "${CRC32_Y}" ]; then \
 		install -D -m755 ${CRC32_Y} ${DESTDIR}${BINDIR}/${CRC32_Y}; \
 	fi
+	for i in ${TEAMING_TOOLS}; do \
+		install -D -m755 tools/$$i ${DESTDIR}${SBINDIR}/$$i; \
+	done
 
 .scd.1 .scd.2 .scd.3 .scd.4 .scd.5 .scd.6 .scd.7 .scd.8:
 	${SCDOC} < $< > $@
@@ -186,6 +192,7 @@ MANPAGES_5 = \
 	doc/interfaces-bridge.5 \
 	doc/interfaces-forward.5 \
 	doc/interfaces-ppp.5 \
+	doc/interfaces-teaming.5 \
 	doc/interfaces-tunnel.5 \
 	doc/interfaces-vrf.5 \
 	doc/interfaces-vrrp.5 \
