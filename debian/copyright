@@ -1,0 +1,27 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: ifupdown-ng
+Source: https://github.com/ifupdown-ng/ifupdown-ng
+
+Files: *
+Copyright:
+ (c) 2020-2021 Ariadne Conill <ariadne@dereferenced.org>
+ (c) 2020-2021 Maximilian Wilhelm <max@sdn.clinic>
+ (c) 2020, Adélie Software in the Public Benefit, Inc.
+ (c) 2017, Kaarle Ritvanen
+ (c) 2012, 2020, Natanael Copa <ncopa@alpinelinux.org>
+License: MIT-like
+
+Files: debian/*
+Copyright:
+ (c) 2021-2022, Thomas Goirand <zigo@debian.org>
+ (c) 2022, Daniel Gröber <dxld@darkboxed.org>
+License: MIT-like
+
+License: MIT-like
+ Permission to use, copy, modify, and/or distribute this software for any
+ purpose with or without fee is hereby granted, provided that the above
+ copyright notice and this permission notice appear in all copies.
+ .
+ This software is provided 'as is' and without any warranty, express or
+ implied.  In no event shall the authors be liable for any damages arising
+ from the use of this software.

@@ -1,0 +1,62 @@
+Source: ifupdown-ng
+Section: admin
+Priority: optional
+Maintainer: Ifupdown NG Maintainers <team+ifupdownng@tracker.debian.org>
+Uploaders:
+ Thomas Goirand <zigo@debian.org>,
+ Maximilian Wilhelm <max@sdn.clinic>,
+ Daniel Gröber <dxld@darkboxed.org>,
+Build-Depends:
+ atf-sh,
+ dh-exec,
+ kyua,
+ libbsd-dev,
+ debhelper-compat (= 12),
+ openstack-pkg-tools,
+ pkg-config,
+ scdoc,
+Standards-Version: 4.6.0
+Vcs-Git: https://salsa.debian.org/debian/ifupdown-ng.git
+Vcs-Browser: https://salsa.debian.org/debian/ifupdown-ng
+Homepage: https://github.com/ifupdown-ng/ifupdown-ng
+Rules-Requires-Root: no
+
+Package: ifupdown-ng
+Architecture: any
+Conflicts:
+ ifupdown,
+ ifupdown2,
+Provides: ifupdown
+Depends:
+ adduser,
+ freebsd-net-tools [kfreebsd-any],
+ inetutils-tools [hurd-any],
+ iproute2 [linux-any],
+ lsb-base,
+ ${misc:Depends},
+ ${net:Depends},
+ ${shlibs:Depends},
+Recommends:
+ isc-dhcp-client | dhcp-client,
+ libteam-utils
+Suggests:
+ ppp,
+ rdnssd,
+ ${net:Suggests},
+ frr
+Multi-Arch: foreign
+Description: Network Interface Management tool similar to ifupdown{,2}
+ ifupdown-ng is a network device manager that is largely compatible with
+ Debian ifupdown, BusyBox ifupdown and Cumulus Networks' ifupdown2.
+ .
+ It is intended as a drop-in replacement for all aforementioned suites and
+ provides the well-known ifup/ifdown/ifquery tools as well as ifctrstat to
+ query interface statistics via CLI.
+ .
+ ifupdown-ng provides dependecy resolutions between interfaces (physical,
+ bond, vlan, bridges, etc.) to configure interfaces in a meaniful order
+ independent of their order within the configuration file(s).
+ .
+ ifupdown-ng currently has support for B.A.T.M.A.N. adv., bonding, bridges,
+ MPLS, PPP, regular tunnels + wireguard, VLANs, VRFs, VXLAN, as well as
+ setting hardware/driver parameters with ethtool.

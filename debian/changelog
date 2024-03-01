@@ -1,0 +1,41 @@
+ifupdown-ng (0.13.3~easynet1-1) unstable; urgency=medium
+
+  * Add teaming v1.0.0
+  * Add VRRP v1.7
+  * Add fix for GRE tunnels under Debian.
+  * Add vxlan-evpn option to set VXLAN interface correctly under bridge for FRRouting EVPN.
+
+ -- EasyNetDev <devel@easynet.dev>  Min, 01 Mar 2024 01:29:34 +0200
+
+ifupdown-ng (0.13.2~easynet1-4) unstable; urgency=medium
+
+  * Fix VRRP IPv6 interface local-link generation
+  * Set both VRRP interface up
+
+ -- Adrian Ban <devel@easynet.dev>  Thu, 10 Sep 2023 01:38:22 +0300
+
+ifupdown-ng (0.13.2~easynet1-3) unstable; urgency=medium
+
+  * Add VRRP tests
+
+ -- Adrian Ban <devel@easynet.dev>  Thu, 10 Sep 2023 01:38:22 +0300
+
+ifupdown-ng (0.13.2~easynet1-2) unstable; urgency=medium
+
+  * Disable IPv6 in team port members.
+  * Don't show ifquery warnings about port member configuration is not exist.
+
+ -- Adrian Ban <devel@easynet.dev>  Thu, 10 Sep 2023 01:38:22 +0300
+
+ifupdown-ng (0.13.2~easynet1-1) unstable; urgency=medium
+
+  * Add teaming support.
+  * Fix GRE tests.
+
+ -- Adrian Ban <devel@easynet.dev>  Thu, 7 Sep 2023 09:05:25 +0300
+
+ifupdown-ng (0.11.4~rc1-1) unstable; urgency=medium
+
+  * Initial release. (Closes: #1003796)
+
+ -- Maximilian Wilhelm <max@sdn.clinic>  Sat, 16 Oct 2021 15:40:25 +0200

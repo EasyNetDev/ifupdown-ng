@@ -1,0 +1,3 @@
+#! /usr/bin/dh-exec --with=install
+dist/debian/networking /usr/share/ifupdown-ng/sbin/
+dist/debian/networking.default => /etc/default/networking

@@ -1,0 +1,35 @@
+#!/usr/bin/make -f
+
+include /usr/share/openstack-pkg-tools/pkgos.make
+
+export DESTDIR := "debian/ifupdown-ng/"
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Compatiblity glue for libbsd (strlcpy 'n friends)
+	dh_auto_build -- all docs \
+		LIBBSD_CFLAGS="-isystem /usr/include/bsd -DLIBBSD_OVERLAY" \
+		LIBBSD_LIBS="-isystem /usr/include/bsd -DLIBBSD_OVERLAY -lbsd"
+
+override_dh_auto_install:
+	dh_auto_install -- install install_docs
+
+	# Move config file in place and let conffile handling care about updates
+	mv debian/ifupdown-ng/etc/network/ifupdown-ng.conf.example debian/ifupdown-ng/etc/network/ifupdown-ng.conf
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 755 debian/ifupdown-ng/usr/share/ifupdown-ng/sbin/*
+
+override_dh_auto_test:
+ifeq (,$(findstring nocheck, $(DEB_BUILD_OPTIONS)))
+	HOME=/tmp dh_auto_test
+endif
+
+override_dh_installsystemd:
+	cp dist/debian/ifupdown-ng.networking.service debian/
+	cp dist/debian/teamd@.service debian/ifupdown-ng.teamd@.service
+	dh_installsystemd --no-scripts --no-restart-after-upgrade --no-stop-on-upgrade --no-start --name networking
+	dh_installsystemd --no-scripts --no-restart-after-upgrade --no-stop-on-upgrade --no-start --name teamd@

@@ -1,0 +1,43 @@
+From 7d6b3856f21809ea1ca208486e99143a460fa6b7 Mon Sep 17 00:00:00 2001
+From: EasyNet <devel@easynet.dev>
+Date: Sun, 10 Sep 2023 18:10:23 +0300
+Subject: [PATCH 1/4] Respect LDLFAGS and CPPFLAGS from environment
+
+---
+ Makefile | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 3898d4a..cacd5d9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -18,7 +18,8 @@ CFLAGS ?= -ggdb3 -Os
+ CFLAGS += -Wall -Wextra -Werror
+ CFLAGS += -Wmissing-declarations -Wmissing-prototypes -Wcast-align -Wpointer-arith -Wreturn-type
+ CFLAGS += ${LIBBSD_CFLAGS}
+-CPPFLAGS = -I.
++CPPFLAGS ?=
++CPPFLAGS += -I.
+ CPPFLAGS += -DINTERFACES_FILE=\"${INTERFACES_FILE}\"
+ CPPFLAGS += -DSTATE_FILE=\"${STATE_FILE}\"
+ CPPFLAGS += -DCONFIG_FILE=\"${CONFIG_FILE}\"
+@@ -27,6 +28,7 @@ CPPFLAGS += -DPACKAGE_VERSION=\"${PACKAGE_VERSION}\"
+ CPPFLAGS += -DPACKAGE_BUGREPORT=\"${PACKAGE_BUGREPORT}\"
+ CPPFLAGS += -DEXECUTOR_PATH=\"${EXECUTOR_PATH}\"
+ 
++LDFLAGS ?=
+ 
+ LIBIFUPDOWN_SRC = \
+ 	libifupdown/list.c \
+@@ -129,7 +131,7 @@ ${CMDS}: ${MULTICALL}
+ 	ln -sf ifupdown $@
+ 
+ ${MULTICALL}: ${TARGET_LIBS} ${MULTICALL_OBJ}
+-	${CC} ${LDFLAGS} -o $@ ${MULTICALL_OBJ} ${LIBS}
++	${CC} ${LDFLAGS} -o $@ ${LDFLAGS} ${MULTICALL_OBJ} ${LIBS}
+ 
+ ${LIBIFUPDOWN_LIB}: ${LIBIFUPDOWN_OBJ}
+ 	${AR} -rcs $@ ${LIBIFUPDOWN_OBJ}
+-- 
+2.40.1
+
