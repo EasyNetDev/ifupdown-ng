@@ -1,11 +1,18 @@
 ifupdown-ng (0.13.3~easynet1-1) unstable; urgency=medium
 
+  * Fix teaming boot issue.
+  * Remove mandatory RUNTIME_DIRECTORY variable for cli.
+
+ -- EasyNetDev <devel@easynet.dev>  Tue, 14 May 2024 01:10:22 +0200
+
+ifupdown-ng (0.13.3~easynet1-1) unstable; urgency=medium
+
   * Add teaming v1.0.0
   * Add VRRP v1.7
   * Add fix for GRE tunnels under Debian.
   * Add vxlan-evpn option to set VXLAN interface correctly under bridge for FRRouting EVPN.
 
- -- EasyNetDev <devel@easynet.dev>  Min, 01 Mar 2024 01:29:34 +0200
+ -- EasyNetDev <devel@easynet.dev>  Mon, 01 Mar 2024 01:29:34 +0200
 
 ifupdown-ng (0.13.2~easynet1-4) unstable; urgency=medium
 
